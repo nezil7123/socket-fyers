@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node server.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "fyers-api-v3": "^1.9.0",
     "ws": "^8.18.0"

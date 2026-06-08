@@ -1,12 +1,25 @@
 let DataSocket = require("fyers-api-v3").fyersDataSocket;
 const WebSocket = require('ws');
+const http = require('http');
+const fs = require('fs');
 
-// 1. Create a local server for your Frontend to connect to
-const localWss = new WebSocket.Server({ port: 9000 });
+// Railway (and most hosts) assign the public port via the PORT env var.
+const PORT = process.env.PORT || 9000;
+
+// A tiny HTTP server gives the public URL a health response AND lets the
+// WebSocket server share the single port the host exposes.
+const httpServer = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Fyers WebSocket bridge is running\n");
+});
+
+// Attach the WebSocket server to the HTTP server (same port).
+const localWss = new WebSocket.Server({ server: httpServer });
 
 // Endpoint that returns { "access_token": "...", "api_id": "APPID-100" }
 const TOKEN_URL = "https://trade.zyfoxe.com/fyers-token";
 const logPath = "./logs"; // Path must exist
+fs.mkdirSync(logPath, { recursive: true });
 
 // Holds the Fyers data socket once it's connected
 let skt = null;
@@ -101,6 +114,10 @@ localWss.on('connection', function (browserClient) {
             console.error("Invalid JSON or error in command:", e.message);
         }
     });
+});
+
+httpServer.listen(PORT, () => {
+    console.log(`WebSocket bridge listening on port ${PORT}`);
 });
 
 start().catch(err => {

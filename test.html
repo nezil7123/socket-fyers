@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fyers Tick Tester</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #181b24; --border: #262a36;
+    --text: #e6e8ee; --muted: #8a90a2; --green: #2ecc71; --red: #ff5b5b;
+    --accent: #4d8bff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, system-ui, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--text); font-size: 14px; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--border);
+           display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .status { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot.off { background: var(--red); }
+  main { padding: 20px; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--border);
+           padding: 8px 14px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  input, select { background: var(--panel); color: var(--text); border: 1px solid var(--border);
+                  padding: 8px 10px; border-radius: 7px; font-size: 13px; }
+  input { width: 260px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+  th, td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  th:first-child, td:first-child { text-align: left; }
+  td.sym { font-weight: 600; }
+  .up { color: var(--green); } .down { color: var(--red); }
+  tr.flash { animation: flash .5s; }
+  @keyframes flash { from { background: rgba(77,139,255,.18); } to { background: transparent; } }
+  .log-wrap h2 { font-size: 13px; color: var(--muted); margin: 0 0 8px; font-weight: 500; }
+  #log { background: #0a0c11; border: 1px solid var(--border); border-radius: 8px;
+         padding: 12px; height: 240px; overflow-y: auto; font-family: ui-monospace, Menlo, monospace;
+         font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+  .log-line { color: var(--muted); }
+  .log-line.in { color: #9fd0ff; } .log-line.out { color: #ffd479; }
+  .log-line.err { color: var(--red); } .log-line.ok { color: var(--green); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Fyers Tick Tester</h1>
+  <div class="status">
+    <span class="dot" id="dot"></span><span id="connText">connecting…</span>
+  </div>
+</header>
+
+<main>
+  <div class="controls">
+    <button class="primary" onclick="subscribe(['MCX:CRUDEOIL26JUNFUT'])">Crude Oil (Jun)</button>
+    <button class="primary" onclick="subscribe(['MCX:SILVER26JULFUT'])">Silver (Jul)</button>
+    <button onclick="subscribe(['MCX:CRUDEOIL26JUNFUT','MCX:SILVER26JULFUT','MCX:SILVERM26JUNFUT'])">Crude + Silver + Silver-M</button>
+    <input id="symInput" placeholder="MCX:CRUDEOILM26JUNFUT" />
+    <button onclick="subscribeCustom()">Subscribe</button>
+    <select id="mode" onchange="changeMode(this.value)">
+      <option value="full">Full mode</option>
+      <option value="lite">Lite mode</option>
+    </select>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th><th>LTP</th><th>Chg</th><th>Chg %</th>
+        <th>Bid</th><th>Ask</th><th>High</th><th>Low</th>
+        <th>Open</th><th>Volume</th><th>Updated</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      <tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">
+        No data yet — connect the server and click a subscribe button.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="log-wrap">
+    <h2>Raw message log</h2>
+    <div id="log"></div>
+  </div>
+</main>
+
+<script>
+const WS_URL = "ws://localhost:7123";
+let ws;
+const rows = {};        // symbol -> <tr>
+const placeholderShown = () => document.querySelector("#rows tr td[colspan]");
+
+function setStatus(state, text) {
+  const dot = document.getElementById("dot");
+  dot.className = "dot" + (state === "on" ? " on" : state === "off" ? " off" : "");
+  document.getElementById("connText").textContent = text;
+}
+
+function log(msg, cls = "") {
+  const el = document.getElementById("log");
+  const line = document.createElement("div");
+  line.className = "log-line " + cls;
+  const t = new Date().toLocaleTimeString();
+  line.textContent = `[${t}] ${msg}`;
+  el.prepend(line);
+  while (el.childElementCount > 300) el.removeChild(el.lastChild);
+}
+
+function connect() {
+  setStatus("", "connecting…");
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => { setStatus("on", "connected to " + WS_URL); log("WebSocket open", "ok"); };
+  ws.onclose = () => { setStatus("off", "disconnected — retrying in 2s"); log("WebSocket closed", "err"); setTimeout(connect, 2000); };
+  ws.onerror = () => { log("WebSocket error (is server.js running on 7123?)", "err"); };
+  ws.onmessage = (ev) => handleMessage(ev.data);
+}
+
+function handleMessage(raw) {
+  let data;
+  try { data = JSON.parse(raw); } catch { log("non-JSON: " + raw, "err"); return; }
+
+  // Server acknowledgements ({status, msg})
+  if (data && data.status !== undefined && data.symbol === undefined) {
+    log(`server: ${data.status} — ${data.msg || ""}`, data.status === "Success" ? "ok" : "err");
+    return;
+  }
+
+  // Tick data — Fyers sends an object with a `symbol` field
+  if (data && data.symbol) {
+    updateRow(data);
+    log("tick " + data.symbol + " ltp=" + (data.ltp ?? "—"), "in");
+  } else {
+    log("in: " + raw, "in");
+  }
+}
+
+function num(v) { return (v === undefined || v === null || v === "") ? "—" : v; }
+
+function updateRow(d) {
+  if (placeholderShown()) document.getElementById("rows").innerHTML = "";
+
+  let tr = rows[d.symbol];
+  if (!tr) {
+    tr = document.createElement("tr");
+    tr.innerHTML = '<td class="sym"></td>' + "<td></td>".repeat(10);
+    document.getElementById("rows").appendChild(tr);
+    rows[d.symbol] = tr;
+  }
+  const c = tr.children;
+  const chg = d.ch, chp = d.chp;
+  const cls = chg > 0 ? "up" : chg < 0 ? "down" : "";
+
+  c[0].textContent = d.symbol;
+  c[1].textContent = num(d.ltp);   c[1].className = cls;
+  c[2].textContent = num(chg);     c[2].className = cls;
+  c[3].textContent = chp !== undefined ? num(chp) + "%" : "—"; c[3].className = cls;
+  c[4].textContent = num(d.bid_price);
+  c[5].textContent = num(d.ask_price);
+  c[6].textContent = num(d.high_price);
+  c[7].textContent = num(d.low_price);
+  c[8].textContent = num(d.open_price);
+  c[9].textContent = num(d.vol_traded_today);
+  c[10].textContent = new Date().toLocaleTimeString();
+
+  tr.classList.remove("flash"); void tr.offsetWidth; tr.classList.add("flash");
+}
+
+function send(obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { log("not connected — can't send", "err"); return; }
+  ws.send(JSON.stringify(obj));
+  log("out: " + JSON.stringify(obj), "out");
+}
+
+function subscribe(symbols) { send({ action: "subscribe", symbols }); }
+function subscribeCustom() {
+  const v = document.getElementById("symInput").value.trim();
+  if (v) subscribe(v.split(",").map(s => s.trim()).filter(Boolean));
+}
+function changeMode(mode) { send({ action: "change_mode", mode }); }
+
+connect();
+</script>
+</body>
+</html>

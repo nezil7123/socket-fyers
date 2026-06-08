@@ -2,7 +2,7 @@ let DataSocket = require("fyers-api-v3").fyersDataSocket;
 const WebSocket = require('ws');
 
 // 1. Create a local server for your Frontend to connect to
-const localWss = new WebSocket.Server({ port: 4133 });
+const localWss = new WebSocket.Server({ port: 9000 });
 
 // Endpoint that returns { "access_token": "...", "api_id": "APPID-100" }
 const TOKEN_URL = "https://trade.zyfoxe.com/fyers-token";
